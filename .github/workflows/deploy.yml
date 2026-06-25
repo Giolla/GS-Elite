@@ -18,20 +18,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.version || github.ref_name }}
-
-      - name: Make Maven Wrapper executable
-        run: chmod +x mvnw
-
-      - name: Set up Java 21
-        uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: maven
-
       - name: Resolve version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -39,13 +25,33 @@ jobs:
           else
             TAG="${{ github.ref_name }}"
           fi
-          VERSION=${TAG#v}
+          echo "VERSION=${TAG#v}" >> $GITHUB_ENV
+
+      # --- Build steps: only on tag push ---
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push'
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Make Maven Wrapper executable
+        if: github.event_name == 'push'
+        run: chmod +x mvnw
+
+      - name: Set up Java 21
+        if: github.event_name == 'push'
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Stamp version and test
+        if: github.event_name == 'push'
+        run: |
           ./mvnw versions:set -DnewVersion=$VERSION -DgenerateBackupPoms=false
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          ./mvnw test
 
-      - name: Run tests
-        run: ./mvnw test
-
+      # --- Auth: always ---
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -55,7 +61,9 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      # --- Build and push image: only on tag push ---
       - name: Build and push Docker image
+        if: github.event_name == 'push'
         run: |
           gcloud auth configure-docker us-central1-docker.pkg.dev
           docker build -t us-central1-docker.pkg.dev/elite-giolla/elite-api/elite-api:${{ env.VERSION }} .
@@ -64,6 +72,18 @@ jobs:
           docker push us-central1-docker.pkg.dev/elite-giolla/elite-api/elite-api:${{ env.VERSION }}
           docker push us-central1-docker.pkg.dev/elite-giolla/elite-api/elite-api:latest
 
+      # --- Verify image exists: only on manual deploy ---
+      - name: Verify image exists
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          IMAGE="us-central1-docker.pkg.dev/elite-giolla/elite-api/elite-api:${{ env.VERSION }}"
+          if ! gcloud artifacts docker images describe "$IMAGE" >/dev/null 2>&1; then
+            echo "::error::Image $IMAGE not found in Artifact Registry. Has tag ${{ env.VERSION }} ever been built?"
+            exit 1
+          fi
+          echo "Found $IMAGE — proceeding with deploy."
+
+      # --- Deploy: always ---
       - name: Deploy to Cloud Run
         id: deploy
         run: |
