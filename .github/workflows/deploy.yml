@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tag to deploy (e.g. v1.0.0)'
+        required: true
 
 permissions:
   contents: read
@@ -14,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.version || github.ref_name }}
 
       - name: Make Maven Wrapper executable
         run: chmod +x mvnw
@@ -25,9 +32,14 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Set release version
+      - name: Resolve version
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.version }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          VERSION=${TAG#v}
           ./mvnw versions:set -DnewVersion=$VERSION -DgenerateBackupPoms=false
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
