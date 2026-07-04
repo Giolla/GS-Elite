@@ -15,5 +15,6 @@ public class Ship {
     private String description;
     private String videoUrl;
     private String backgroundImage;
+    private String schematic;
     private List<String> screenShots;
 }

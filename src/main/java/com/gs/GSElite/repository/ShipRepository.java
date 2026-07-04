@@ -29,6 +29,6 @@ public class ShipRepository {
         if (!doc.exists()) {
             return Optional.empty();
         }
-        return Optional.of(doc.toObject(Ship.class));
+        return Optional.ofNullable(doc.toObject(Ship.class));
     }
 }
